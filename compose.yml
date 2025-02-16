@@ -14,9 +14,7 @@ services:
     ports: 
       - "8000:8000"
     volumes:
-      - ./data/images:/app/images
-      - ./data/images.db:/app/images.db
-      - ./data/thumbnails:/app/thumbnails
+      - ./data:/app/data
     develop:
       watch:
         - path: ./api/main.py

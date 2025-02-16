@@ -11,13 +11,18 @@ import os, sys
 import hashlib
 from fastapi.middleware.cors import CORSMiddleware
 
+os.chdir("./data")
+
 origins = [
     "http://localhost",
     "http://localhost:8000",
     "http://localhost:3000",
 ]
 
-app = FastAPI()
+app = FastAPI(
+    docs_url=None,
+    redoc_url=None
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -90,12 +95,16 @@ async def image_upload(file: UploadFile = File(...), sha1: str = None):
         if uuid:
             raise HTTPException(409, {"error": "File already exists", "uuid": uuid})
     # Then check with SHA1 hash of the file
-    uuid = hash_collision_check(file)
+    hash, uuid = hash_collision_check(file)
     if uuid:
         raise HTTPException(409, {"error": "File already exists", "uuid": uuid})
-
+    # No collision found, generate new UUID and insert into hashtable
     uuid = str(uuid4())
-
+    cursor.execute(
+        "INSERT OR REPLACE INTO hashtable (hash, uuid) VALUES (?, ?)", (hash, uuid)
+    )
+    db.commit()
+    
     # Open the image file with PIL
     with Image.open(file.file) as img:
         # Get the image's EXIF data
@@ -139,8 +148,6 @@ async def image_upload(file: UploadFile = File(...), sha1: str = None):
             exif_dict.get("ExposureBiasValue", None),
             exif_dict.get("Software", None),
         )
-        exif_make = exif_make if exif_make else None
-        exif_model = exif_model if exif_model else None
         exif_datetime_original = (
             string_to_timestamp(exif_datetime_original)
             if exif_datetime_original
@@ -154,11 +161,9 @@ async def image_upload(file: UploadFile = File(...), sha1: str = None):
         exif_focallengthin35mmfilm = (
             int(exif_focallengthin35mmfilm) if exif_focallengthin35mmfilm else None
         )
-        exif_lensmodel = exif_lensmodel if exif_lensmodel else None
         exif_exposurebiasvalue = (
             float(exif_exposurebiasvalue) if exif_exposurebiasvalue else None
         )
-        exif_software = exif_software if exif_software else None
 
         cursor.execute(
             "INSERT INTO images (uuid, filename, Make, Model, DateTimeOriginal, ExposureTime, FNumber, ISOSpeedRatings, FocalLengthIn35mmFilm, LensModel, ExposureBiasValue, Software, exif_all) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -206,9 +211,9 @@ async def get_image(column: list[str] = Query(None), sort: str = "DateTimeOrigin
         column = [col for col in column if col in DB_IMAGE_COLUMNS]
     if column:
         column = ", ".join(column)
-        cursor.execute(f"SELECT {column} FROM images ORDER BY ?", (sort,))
+        cursor.execute(f"SELECT {column} FROM images ORDER BY {sort}")
     else:
-        cursor.execute("SELECT * FROM images ORDER BY ?", (sort,))
+        cursor.execute(f"SELECT * FROM images ORDER BY {sort}")
 
     return fetchall_dict(cursor)
 
@@ -331,12 +336,7 @@ def hash_collision_check(file: UploadFile) -> bool:
     hash = hashlib.sha1(file.file.read()).hexdigest()
     uuid = hash_collision_check_with_sha1(hash)
     file.file.seek(0)
-    if not uuid:
-        cursor.execute(
-            "INSERT OR REPLACE INTO hashtable (hash, uuid) VALUES (?, ?)", (hash, uuid)
-        )
-        db.commit()
-    return uuid
+    return hash, uuid
 
 
 def generate_thumbnail_from_path_and_save(
