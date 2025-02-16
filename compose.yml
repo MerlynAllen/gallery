@@ -1,0 +1,23 @@
+services:
+  web:
+    build: ./web
+    ports: 
+      - "80:80"
+    depends_on:
+      - api
+    develop:
+      watch:
+        - path: ./web
+          action: "rebuild"
+  api:
+    build: ./api
+    ports: 
+      - "8000:8000"
+    volumes:
+      - ./data/images:/app/images
+      - ./data/images.db:/app/images.db
+      - ./data/thumbnails:/app/thumbnails
+    develop:
+      watch:
+        - path: ./api/main.py
+          action: "rebuild"
